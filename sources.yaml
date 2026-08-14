@@ -1,0 +1,125 @@
+# News Pipeline Source Configuration
+# Read by scripts/fetch.sh — the Phase 1 fetch script
+# Format: YAML, parsed by Python
+
+rss_feeds:
+  # Bleeding edge
+  - {name: "hn-frontpage", url: "https://hnrss.org/frontpage", type: "rss"}
+  - {name: "lobsters", url: "https://lobste.rs/rss", type: "rss"}
+  - {name: "techmeme", url: "https://www.techmeme.com/feed.xml", type: "rss"}
+  - {name: "producthunt", url: "https://www.producthunt.com/feed", type: "rss"}
+  - {name: "slashdot", url: "https://rss.slashdot.org/Slashdot/slashdotMain", type: "rss"}
+  # General tech
+  - {name: "arstechnica", url: "https://feeds.arstechnica.com/arstechnica/index", type: "rss"}
+  - {name: "verge", url: "https://www.theverge.com/rss/index.xml", type: "rss"}
+  - {name: "techcrunch", url: "https://techcrunch.com/feed/", type: "rss"}
+  - {name: "theregister", url: "https://www.theregister.com/headlines.atom", type: "rss"}
+  - {name: "wired", url: "https://www.wired.com/feed/rss", type: "rss"}
+  - {name: "bbc-tech", url: "https://feeds.bbci.co.uk/news/technology/rss.xml", type: "rss"}
+  - {name: "ieee-spectrum", url: "https://spectrum.ieee.org/feeds/feed.rss", type: "rss"}
+  # AI/ML
+  - {name: "mit-tech-review", url: "https://www.technologyreview.com/feed/", type: "rss"}
+  - {name: "openai-blog", url: "https://openai.com/blog/rss.xml", type: "rss"}
+  - {name: "google-ai-blog", url: "https://blog.google/technology/ai/rss/", type: "rss"}
+  - {name: "huggingface", url: "https://huggingface.co/blog/feed.xml", type: "rss"}
+  - {name: "nvidia-blog", url: "https://blogs.nvidia.com/feed/", type: "rss"}
+  - {name: "ms-research", url: "https://www.microsoft.com/en-us/research/feed/", type: "rss"}
+  - {name: "google-research", url: "https://research.google/blog/rss/", type: "rss"}
+  - {name: "latent-space", url: "https://www.latent.space/feed", type: "rss"}
+  - {name: "last-week-in-ai", url: "https://www.lastweekinai.com/feed", type: "rss"}
+  - {name: "import-ai", url: "https://importai.substack.com/feed", type: "rss"}
+  - {name: "arxiv-cs-ai", url: "https://arxiv.org/rss/cs.AI", type: "rss", max_items: 15}
+  - {name: "arxiv-cs-lg", url: "https://arxiv.org/rss/cs.LG", type: "rss", max_items: 15}
+  - {name: "arxiv-cs-cl", url: "https://arxiv.org/rss/cs.CL", type: "rss", max_items: 15}
+  # Developer
+  - {name: "github-blog", url: "https://github.blog/feed/", type: "rss"}
+  - {name: "infoq", url: "https://www.infoq.com/feed/", type: "rss"}
+  - {name: "lwn", url: "https://lwn.net/headlines/rss", type: "rss"}
+  - {name: "devto", url: "https://dev.to/feed", type: "rss"}
+  - {name: "cloudflare-blog", url: "https://blog.cloudflare.com/rss/", type: "rss"}
+  - {name: "netflix-tech", url: "https://netflixtechblog.com/feed", type: "rss"}
+  - {name: "meta-eng", url: "https://engineering.fb.com/feed/", type: "rss"}
+  - {name: "phoronix", url: "https://www.phoronix.com/rss.php", type: "rss"}
+  - {name: "so-blog", url: "https://stackoverflow.blog/feed/", type: "rss"}
+  # Startup/Business
+  - {name: "tc-startups", url: "https://techcrunch.com/category/startups/feed/", type: "rss"}
+  - {name: "stratechery", url: "https://stratechery.com/feed/", type: "rss"}
+  - {name: "sifted", url: "https://sifted.eu/feed/", type: "rss"}
+  # Science
+  - {name: "nature", url: "https://feeds.nature.com/nature/rss/current", type: "rss"}
+  - {name: "quanta", url: "https://www.quantamagazine.org/feed/", type: "rss"}
+  - {name: "sciencedaily", url: "https://rss.sciencedaily.com/all.xml", type: "rss"}
+  - {name: "science-mag", url: "https://www.science.org/rss/news_current.xml", type: "rss"}
+  # Hardware
+  - {name: "toms-hardware", url: "https://www.tomshardware.com/feeds/all", type: "rss"}
+  - {name: "servethehome", url: "https://www.servethehome.com/feed/", type: "rss"}
+  - {name: "semiengineering", url: "https://semiengineering.com/feed/", type: "rss"}
+  - {name: "ee-times", url: "https://www.eetimes.com/feed/", type: "rss"}
+  - {name: "techpowerup", url: "https://www.techpowerup.com/rss", type: "rss"}
+  # Security
+  - {name: "hackernews-sec", url: "https://feeds.feedburner.com/TheHackersNews", type: "rss"}
+  - {name: "bleepingcomputer", url: "https://www.bleepingcomputer.com/feed/", type: "rss"}
+  - {name: "krebs", url: "https://krebsonsecurity.com/feed/", type: "rss"}
+  - {name: "schneier", url: "https://www.schneier.com/feed/atom/", type: "rss"}
+  - {name: "dark-reading", url: "https://www.darkreading.com/rss.xml", type: "rss"}
+  - {name: "securityweek", url: "https://www.securityweek.com/feed/", type: "rss"}
+  # Newsletter
+  - {name: "tldr", url: "https://tldr.tech/rss", type: "rss"}
+
+api_sources:
+  - name: "hn-algolia-top"
+    url: "https://hn.algolia.com/api/v1/search?tags=story&hitsPerPage=30&numericFilters=points%3E10"
+    type: "api"
+
+google_news_queries:
+  - {name: "gn-tech", query: "technology OR AI OR startup", gl: "US", hl: "en-US"}
+  - {name: "gn-x-proxy", query: "site:x.com OR site:twitter.com", gl: "US", hl: "en-US"}
+  - {name: "gn-india-tech", query: "Bangalore technology OR startup", gl: "IN", hl: "en-IN"}
+
+reddit_subreddits:
+  # Tier 1
+  - {name: "LocalLLaMA", tier: 1}
+  - {name: "ClaudeAI", tier: 1}
+  - {name: "ChatGPT", tier: 1}
+  - {name: "singularity", tier: 1}
+  - {name: "AI_Agents", tier: 1}
+  - {name: "ClaudeCode", tier: 1}
+  - {name: "technology", tier: 1}
+  - {name: "startups", tier: 1}
+  - {name: "cybersecurity", tier: 1}
+  - {name: "developersIndia", tier: 1}
+  # Tier 2
+  - {name: "OpenAI", tier: 2}
+  - {name: "Anthropic", tier: 2}
+  - {name: "GeminiAI", tier: 2}
+  - {name: "artificial", tier: 2}
+  - {name: "LLMDevs", tier: 2}
+  - {name: "ChatGPTCoding", tier: 2}
+  - {name: "SideProject", tier: 2}
+  - {name: "YCombinator", tier: 2}
+  - {name: "selfhosted", tier: 2}
+  - {name: "devops", tier: 2}
+  - {name: "nvidia", tier: 2}
+  - {name: "netsec", tier: 2}
+  - {name: "privacy", tier: 2}
+  - {name: "Entrepreneur", tier: 2}
+  - {name: "Futurology", tier: 2}
+  - {name: "opensource", tier: 2}
+  - {name: "sysadmin", tier: 2}
+  - {name: "experienceddevs", tier: 2}
+  - {name: "cscareerquestions", tier: 2}
+  - {name: "hermesagent", tier: 2}
+
+browser_sources:
+  - {name: "x-trending", type: "camofox", url: "https://x.com/explore/tabs/trending"}
+  - {name: "github-trending", type: "camofox", url: "https://github.com/trending?since=daily"}
+  - {name: "x-timelines", type: "twscrape", accounts_file: "x_accounts.txt"}
+
+# Engagement thresholds for filtering
+thresholds:
+  hn_min_points: 10
+  reddit_tier1_min_score: 50
+  reddit_tier2_min_score: 10
+
+# Data retention
+retention_days: 30

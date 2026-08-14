@@ -1,0 +1,24 @@
+# Data — scraped content, briefings, podcasts, personal history
+data/
+
+# Credentials and account databases
+accounts.db
+*.db
+
+# Cached user IDs (not needed by others)
+x_user_ids.json
+
+# NotebookLM notebook registry (tied to Google account)
+notebooks/
+
+# Backup/temp files
+*.bak
+*.pyc
+__pycache__/
+
+# Test scripts with hardcoded paths
+scripts/test_*.py
+
+# OS files
+.DS_Store
+Thumbs.db
