@@ -7,9 +7,11 @@ Usage:
     python3 scripts/phase_logger.py <phase> <today>
 
 Phases:
-    phase3-5   — diff cleaned_items.json vs briefing.md → dropped items
-    phase5.5   — diff briefing.md before/after → changes
-    phase6     — snapshot delivered_history.json delta + briefing.md → delivered items
+    phase3-5     — diff cleaned_items.json vs briefing.md → dropped items
+    phase5.5-pre — snapshot briefing.md before free-roam
+    phase5.5     — diff briefing.md before/after → changes
+    phase6       — snapshot delivered items from history
+    reasoning    — extract per-phase reasoning from session DB (run once at end)
 """
 import json
 import os
@@ -184,6 +186,138 @@ def snapshot_pre_freeroam(data_dir, log_dir):
         print("  WARNING: briefing.md not found for pre-free-roam snapshot")
 
 
+def log_reasoning(data_dir, log_dir, today):
+    """Extract per-phase reasoning from the Hermes session DB.
+
+    Finds the cron session for today, gets all messages in order,
+    splits at phase_logger.py tool-call boundaries, writes per-phase
+    reasoning files with both assistant text and model reasoning.
+    """
+    import sqlite3
+    from datetime import datetime as dt
+
+    db_path = os.path.expanduser("~/.hermes/state.db")
+    if not os.path.exists(db_path):
+        print("  ERROR: state.db not found")
+        return
+
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+
+    # Find today's cron session — title format: "news-pipeline · Aug 19 05:18"
+    # Convert 2026-08-19 to "Aug 19" for matching
+    try:
+        dt_obj = dt.strptime(today, "%Y-%m-%d")
+        title_pattern = f"Aug {dt_obj.day}"
+    except ValueError:
+        title_pattern = today
+
+    cur.execute("""
+        SELECT id FROM sessions
+        WHERE source = 'cron' AND title LIKE ?
+        ORDER BY started_at DESC LIMIT 1
+    """, (f"%{title_pattern}%",))
+    row = cur.fetchone()
+    if not row:
+        print(f"  ERROR: No cron session found for {today}")
+        conn.close()
+        return
+
+    session_id = row[0]
+    print(f"  Session: {session_id}")
+
+    # Get all messages in order
+    cur.execute("""
+        SELECT id, role, content, tool_name, tool_calls,
+               reasoning, reasoning_content, timestamp
+        FROM messages
+        WHERE session_id = ?
+        ORDER BY timestamp ASC, id ASC
+    """, (session_id,))
+
+    messages = cur.fetchall()
+    conn.close()
+
+    # Define phase boundaries based on phase_logger.py tool calls
+    # Each boundary is (marker_text_in_tool_output, phase_label)
+    boundaries = [
+        ("phase_logger.py phase3-5", "phase3-5"),
+        ("phase_logger.py phase5.5-pre", "phase5.5-pre"),
+        ("phase_logger.py phase5.5", "phase5.5"),
+        ("phase_logger.py phase6", "phase6"),
+        ("phase_logger.py reasoning", "end"),
+    ]
+
+    # Find boundary indices
+    phase_ranges = []
+    current_phase = "phase1-2"
+    current_start = 0
+
+    for i, (mid, role, content, tool_name, tool_calls, \
+            reasoning, reasoning_content, ts) in enumerate(messages):
+        # Check if this is a tool result containing a phase_logger call
+        if role == "tool" and tool_name == "terminal":
+            text = (content or "")
+            for marker, label in boundaries:
+                if marker in text:
+                    phase_ranges.append((current_phase, current_start, i))
+                    current_phase = label
+                    current_start = i + 1
+                    break
+
+    # Final phase
+    phase_ranges.append((current_phase, current_start, len(messages)))
+
+    # Extract reasoning per phase
+    for phase_name, start_idx, end_idx in phase_ranges:
+        if phase_name == "end":
+            continue
+
+        reasoning_parts = []
+        tool_count = 0
+
+        for i in range(start_idx, end_idx):
+            mid, role, content, tool_name, tool_calls, \
+                reasoning, reasoning_content, ts = messages[i]
+
+            if role == "assistant":
+                # Model's internal reasoning (thinking tokens)
+                if reasoning and reasoning.strip():
+                    reasoning_parts.append(f"### Reasoning\n\n{reasoning.strip()}\n")
+                # Model's visible text output
+                if content and content.strip():
+                    reasoning_parts.append(f"### Output\n\n{content.strip()}\n")
+
+            elif role == "tool":
+                tool_count += 1
+                # Include tool name and truncated output for context
+                tool_preview = (content or "")[:200]
+                reasoning_parts.append(f"### Tool: {tool_name}\n\n```\n{tool_preview}\n```\n")
+
+        if reasoning_parts:
+            log_file = f"{log_dir}/{phase_name}_reasoning.md"
+            with open(log_file, "w") as f:
+                f.write(f"# Phase: {phase_name}\n\n")
+                f.write(f"Messages: {end_idx - start_idx} | Tools: {tool_count}\n\n---\n\n")
+                f.write("\n\n".join(reasoning_parts))
+            print(f"  Wrote {log_file} ({len(reasoning_parts)} segments, {tool_count} tools)")
+        else:
+            print(f"  {phase_name}: no reasoning content found")
+
+    # Also write a session summary
+    summary = {
+        "session_id": session_id,
+        "total_messages": len(messages),
+        "phases": [
+            {"phase": p, "start": s, "end": e, "messages": e - s}
+            for p, s, e in phase_ranges if p != "end"
+        ],
+    }
+    with open(f"{log_dir}/session_summary.json", "w") as f:
+        json.dump(summary, f, indent=2)
+    print(f"  Wrote {log_dir}/session_summary.json")
+
+
 def main():
     if len(sys.argv) < 3:
         print("Usage: python3 scripts/phase_logger.py <phase> <today>")
@@ -209,6 +343,10 @@ def main():
         result = log_phase5_5(data_dir, log_dir)
     elif phase == "phase6":
         result = log_phase6(data_dir, log_dir)
+    elif phase == "reasoning":
+        result = log_reasoning(data_dir, log_dir, today)
+        # log_reasoning writes its own files
+        return
     else:
         print(f"Unknown phase: {phase}")
         sys.exit(1)

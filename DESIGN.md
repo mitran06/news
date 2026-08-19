@@ -412,10 +412,16 @@ news-pipeline/
 │       ├── health_report.json    ← Phase 2 output
 │       ├── briefing.md           ← Phase 3-5 → Phase 5.5 → final
 │       ├── podcast-source.md     ← Phase 5.5 output
-│       └── phase_logs/           ← observability logs
-│           ├── phase3-5_dropped.json  ← items dropped with reasons
-│           ├── phase5.5_changes.json  ← dedup/add/remove decisions
-│           └── phase6_delivered.md    ← exact Telegram message sent
+│       └── phase_logs/           ← observability logs (deterministic, zero-token)
+│           ├── phase3-5.json         ← items dropped with title/source/score
+│           ├── phase5.5.json         ← headlines added/removed, dropped duplicates
+│           ├── phase6.json           ← delivered items snapshot
+│           ├── briefing_pre_freeroam.md ← briefing snapshot before Phase 5.5
+│           ├── phase1-2_reasoning.md ← model reasoning + tool calls per phase
+│           ├── phase3-5_reasoning.md
+│           ├── phase5.5_reasoning.md
+│           ├── phase6_reasoning.md
+│           └── session_summary.json  ← phase boundaries, message counts
 ├── data/
 │   └── delivered_history.json    ← rolling 7-day delivered items (cross-session dedup)
 └── notebooks/
