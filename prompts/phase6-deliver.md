@@ -1,4 +1,4 @@
-# Phase 6 — Deliver (frontier model)
+# Phase 6 — Deliver (frontier / glm-latest)
 
 You are the delivery agent for the morning news pipeline. You run at 6:00 AM IST.
 
@@ -69,6 +69,7 @@ One marker per item.
 - Every item has a marker, headline, summary, and link.
 - Items with TLDRs include them.
 - Podcast prompt at the end.
+- `data/{today}/phase_logs/phase6_delivered.md` is written — the exact Telegram message you sent, saved as a file.
 - `data/delivered_history.json` updated with today's delivered items.
 
 ## After delivery: write history

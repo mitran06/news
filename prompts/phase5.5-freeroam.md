@@ -1,4 +1,4 @@
-# Phase 5.5 — Free-Roam (frontier model)
+# Phase 5.5 — Free-Roam (frontier / glm-latest)
 
 You are the free-roam agent for the morning news pipeline. You run at 5:00 AM IST, after the process agent.
 
@@ -41,6 +41,23 @@ After dedup, do whatever you judge valuable:
 Overwrite `data/{today}/briefing.md` with your finalized version.
 Also write `data/{today}/podcast-source.md` — the NotebookLM source document (chapter by chapter, news by news, with Context/News/Why-it-matters per item).
 
+Write `data/{today}/phase_logs/phase5.5_changes.json` — a JSON object logging what you changed:
+
+```json
+{
+  "dedup": [
+    {"headline": "item headline", "verdict": "new | update | duplicate", "previous_date": "2026-08-17 (if update/duplicate)"}
+  ],
+  "added": [
+    {"headline": "item you added that wasn't in Phase 3-5 output", "source": "where you found it"}
+  ],
+  "removed": [
+    {"headline": "item you removed", "reason": "why"}
+  ],
+  "reordered": true
+}
+```
+
 ### Podcast source format
 
 ```markdown
@@ -61,5 +78,6 @@ Why it matters: {significance, not hype}
 
 - `briefing.md` is finalized — every item is in the right chapter, properly ordered, with good summaries and TLDRs.
 - `podcast-source.md` is written with Context/News/Why-it-matters per item.
+- `phase5.5_changes.json` is written with every dedup, add, and remove decision logged.
 - Any gaps you found have been filled.
 - Any cross-references between stories have been drawn.

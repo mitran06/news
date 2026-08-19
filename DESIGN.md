@@ -7,12 +7,12 @@ Daily automated news pipeline. Fetches from multiple sources at 4 AM IST, proces
 | Time (IST) | Phase | What runs |
 |---|---|---|
 | 04:00 | Phase 1 — Fetch | Orchestrator runs fetch script (`timeout 3600 python3 scripts/fetch.py`). ~42 min. |
-| ~04:45 | Phase 2 — Verify & Clean | Orchestrator delegates to lightweight model subagent. Dedup, SEO filter, retries. ~5 min. |
+| ~04:45 | Phase 2 — Verify & Clean | Orchestrator delegates to open-fast subagent. Dedup, SEO filter, retries. ~5 min. |
 | ~04:50 | Phase 3-5 — Process | Orchestrator delegates to frontier subagent. Hype, chapter, summarize, TLDR, deep-dive. ~25 min. |
 | ~05:15 | Phase 5.5 — Free-Roam | Orchestrator delegates to frontier subagent. Cross-reference, fill gaps, podcast-source.md. ~25 min. |
 | ~05:40 | Phase 6 — Deliver | Orchestrator formats DeArrow headlines and sends Telegram message directly. ~5 min. |
 
-**One cron job, one agent.** The agent runs the fetch script, then executes each phase itself sequentially — no delegation, no subagents. This avoids the the provider's max concurrent request limit. No timing conflicts — each phase waits for the previous to complete. Phase 7 (podcast) is triggered by user reply.
+**One cron job, one agent.** The agent runs the fetch script, then executes each phase itself sequentially — no delegation, no subagents. This avoids the GLM provider's max_parallel_requests limit (5 concurrent). No timing conflicts — each phase waits for the previous to complete. Phase 7 (podcast) is triggered by user reply.
 
 Gateway timeout set to 7200s (2h) to accommodate the full pipeline runtime.
 
@@ -398,7 +398,7 @@ news-pipeline/
 ├── scripts/
 │   └── fetch.py           ← Phase 1 fetch script (cron, no_agent)
 ├── prompts/
-│   ├── phase2-verify.md   ← Phase 2: verify & clean (lightweight model)
+│   ├── phase2-verify.md   ← Phase 2: verify & clean (open-fast)
 │   ├── phase3-5-process.md ← Phase 3-5: process (frontier)
 │   ├── phase5.5-freeroam.md ← Phase 5.5: free-roam (frontier)
 │   ├── phase6-deliver.md  ← Phase 6: Telegram delivery (frontier)
@@ -411,7 +411,11 @@ news-pipeline/
 │       ├── cleaned_items.json    ← Phase 2 output
 │       ├── health_report.json    ← Phase 2 output
 │       ├── briefing.md           ← Phase 3-5 → Phase 5.5 → final
-│       └── podcast-source.md     ← Phase 5.5 output
+│       ├── podcast-source.md     ← Phase 5.5 output
+│       └── phase_logs/           ← observability logs
+│           ├── phase3-5_dropped.json  ← items dropped with reasons
+│           ├── phase5.5_changes.json  ← dedup/add/remove decisions
+│           └── phase6_delivered.md    ← exact Telegram message sent
 ├── data/
 │   └── delivered_history.json    ← rolling 7-day delivered items (cross-session dedup)
 └── notebooks/
@@ -422,7 +426,7 @@ news-pipeline/
 
 ## Pipeline Architecture (v2 — Token-Efficient)
 
-**Principle:** deterministic script does all mechanical work (0 tokens). lightweight model does cheap judgment (verify, dedup, SEO). Frontier model (frontier model) does real thinking — with freedom to deep-dive any item it finds interesting. A free-roam frontier agent runs before delivery.
+**Principle:** deterministic script does all mechanical work (0 tokens). open-fast does cheap judgment (verify, dedup, SEO). Frontier model (glm-latest) does real thinking — with freedom to deep-dive any item it finds interesting. A free-roam frontier agent runs before delivery.
 
 ### Phase 1 — Collect (Script, 0 tokens, ~4:00 AM)
 
@@ -439,7 +443,7 @@ Pure script (`no_agent=True`). Fetches all sources, parses, applies mechanical f
 
 **Script does NOT do:** dedup, SEO farm detection, sentiment, keyword filtering, chapter assignment. Those need judgment → model.
 
-### Phase 2 — Verify & Clean (lightweight model, ~5K tokens, ~4:05 AM)
+### Phase 2 — Verify & Clean (open-fast, ~5K tokens, ~4:05 AM)
 
 Cheap model. Reads `manifest.json` + raw items.
 
@@ -452,7 +456,7 @@ Cheap model. Reads `manifest.json` + raw items.
 
 **Output:** cleaned item list as JSON, fetch health report.
 
-### Phase 3-5 — Process (frontier model, ~60-80K tokens, ~4:10 AM)
+### Phase 3-5 — Process (frontier / glm-latest, ~60-80K tokens, ~4:10 AM)
 
 Single LLM pass. Input: cleaned items from Phase 2. The model does hype assessment, chapter assignment, STE100 summary, and discussion TLDR in one call.
 
@@ -465,7 +469,7 @@ The model decides what's worth the extra tokens, not the script.
 
 **Output:** `briefing.md` with full annotations + deep-dives where warranted.
 
-### Phase 5.5 — Free-Roam (frontier model, ~30-50K tokens, ~5:00 AM)
+### Phase 5.5 — Free-Roam (frontier / glm-latest, ~30-50K tokens, ~5:00 AM)
 
 Free-roam agent before final delivery. Input: `briefing.md` from Phase 3-5.
 
@@ -480,7 +484,7 @@ Free-roam agent before final delivery. Input: `briefing.md` from Phase 3-5.
 
 **Output:** finalized `briefing.md` ready for delivery + `podcast-source.md`.
 
-### Phase 6 — Deliver (frontier model, ~20K tokens, ~6:00 AM)
+### Phase 6 — Deliver (frontier / glm-latest, ~20K tokens, ~6:00 AM)
 
 Reads finalized `briefing.md`. Formats DeArrow-style Telegram headlines with the friend voice. Sends Telegram message. Asks for `/podcast` approval. After delivery, appends delivered items to `data/delivered_history.json`.
 
@@ -515,19 +519,19 @@ On `/podcast` reply: read `podcast-source.md`, create NotebookLM notebook, gener
 | Component | Model | Est. Tokens |
 |---|---|---|
 | Phase 1 (fetch) | — | 0 |
-| Phase 2 (verify + clean) | lightweight model | ~5K |
-| Phase 3-5 (process + deep-dives) | frontier model | ~60-80K |
-| Phase 5.5 (free-roam + cross-session dedup) | frontier model | ~32-52K |
-| Phase 6 (deliver + history write) | frontier model | ~21K |
+| Phase 2 (verify + clean) | open-fast | ~5K |
+| Phase 3-5 (process + deep-dives) | glm-latest | ~60-80K |
+| Phase 5.5 (free-roam + cross-session dedup) | glm-latest | ~32-52K |
+| Phase 6 (deliver + history write) | glm-latest | ~21K |
 | **Daily total** | | **~118-164K** |
-| Phase 7 (podcast, on-demand) | frontier model | ~15K |
+| Phase 7 (podcast, on-demand) | glm-latest | ~15K |
 
 ### Toolsets per Phase
 
 | Phase | Toolsets | Rationale |
 |---|---|---|
 | 1 (script) | none | Pure script |
-| 2 (lightweight model) | `terminal` | Read files, run retry scripts |
+| 2 (open-fast) | `terminal` | Read files, run retry scripts |
 | 3-5 (frontier) | `terminal`, `web` | Read items, fetch articles, research context |
 | 5.5 (free-roam) | `terminal`, `web` | Full freedom to research, verify, cross-reference |
 | 6 (deliver) | `terminal` | Read briefing, format, send |
@@ -568,7 +572,7 @@ The fetch script applies mechanical filters before storing items. Only items tha
 - Lobsters: filter by score if available in RSS, otherwise keep all (low volume).
 
 **Deduplication (in Phase 2, not fetch script):**
-- The fetch script does NOT dedup. Dedup is Phase 2's job (lightweight model).
+- The fetch script does NOT dedup. Dedup is Phase 2's job (open-fast model).
 - Phase 2 normalizes URLs (strip utm_*, ref, source, trailing slashes, fragments) and compares titles for similarity.
 - Keeps first occurrence, notes duplicates.
 
