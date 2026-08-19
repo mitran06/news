@@ -107,25 +107,10 @@ If the item has `top_comments` and `discussion_body` fields (extracted by the fe
 
 Write `data/{today}/briefing.md` — a structured markdown document with all items, grouped by chapter, ordered within chapter, with hype assessment, STE100 summary, and TLDR (where applicable).
 
-Write `data/{today}/phase_logs/phase3-5_dropped.json` — a JSON array of every item you dropped. For each dropped item:
-
-```json
-{
-  "title": "the original headline",
-  "url": "the item's URL",
-  "source": "r/hermesagent, hn-frontpage, etc.",
-  "score": 37,
-  "reason": "one line: why this was dropped"
-}
-```
-
-If no items were dropped, write `[]`.
-
 ## Completion criteria
 
-- Every item in `cleaned_items.json` is either in `briefing.md` (in exactly one chapter) or in `phase3-5_dropped.json` with a reason. No item is missing from both.
-- Every item in `briefing.md` has a hype assessment with a one-line justification.
-- Every item in `briefing.md` has a STE100 summary.
+- Every item in `cleaned_items.json` is in exactly one chapter (or explicitly dropped with a reason).
+- Every item has a hype assessment with a one-line justification.
+- Every item has a STE100 summary.
 - Every qualifying discussion item has a TLDR.
-- `phase3-5_dropped.json` is written.
 - `briefing.md` is written and ready for the free-roam agent (Phase 5.5).
