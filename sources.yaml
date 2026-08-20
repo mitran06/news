@@ -19,6 +19,7 @@ rss_feeds:
   - {name: "ieee-spectrum", url: "https://spectrum.ieee.org/feeds/feed.rss", type: "rss"}
   # AI/ML
   - {name: "mit-tech-review", url: "https://www.technologyreview.com/feed/", type: "rss"}
+  - {name: "marktechpost", url: "https://www.marktechpost.com/feed/", type: "rss"}
   - {name: "openai-blog", url: "https://openai.com/blog/rss.xml", type: "rss"}
   - {name: "google-ai-blog", url: "https://blog.google/technology/ai/rss/", type: "rss"}
   - {name: "huggingface", url: "https://huggingface.co/blog/feed.xml", type: "rss"}
