@@ -205,18 +205,21 @@ def log_reasoning(data_dir, log_dir, today):
     cur = conn.cursor()
 
     # Find today's cron session — title format: "news-pipeline · Aug 19 05:18"
-    # Convert 2026-08-19 to "Aug 19" for matching
+    # Match by date in started_at timestamp (more reliable than title, which
+    # may not be committed yet if the session is still active).
     try:
         dt_obj = dt.strptime(today, "%Y-%m-%d")
-        title_pattern = f"Aug {dt_obj.day}"
+        day_start = dt_obj.timestamp()
+        day_end = dt_obj.replace(hour=23, minute=59, second=59).timestamp()
     except ValueError:
-        title_pattern = today
+        day_start = 0
+        day_end = float('inf')
 
     cur.execute("""
         SELECT id FROM sessions
-        WHERE source = 'cron' AND title LIKE ?
+        WHERE source = 'cron' AND started_at >= ? AND started_at <= ?
         ORDER BY started_at DESC LIMIT 1
-    """, (f"%{title_pattern}%",))
+    """, (day_start, day_end))
     row = cur.fetchone()
     if not row:
         print(f"  ERROR: No cron session found for {today}")
@@ -241,10 +244,15 @@ def log_reasoning(data_dir, log_dir, today):
     # Define phase boundaries based on phase_logger.py tool calls
     # Each boundary is (marker_text_in_tool_output, phase_label)
     boundaries = [
-        ("phase_logger.py phase3-5", "phase3-5"),
+        # Order matters: more specific markers first
         ("phase_logger.py phase5.5-pre", "phase5.5-pre"),
-        ("phase_logger.py phase5.5", "phase5.5"),
+        ("Snapshotted pre-free-roam", "phase5.5-pre"),
+        ("phase_logger.py phase3-5", "phase3-5"),
+        ("phase3-5.json", "phase3-5"),
+        ("phase_logger.py phase5.5 ", "phase5.5"),
+        ("phase5.5.json", "phase5.5"),
         ("phase_logger.py phase6", "phase6"),
+        ("phase6.json", "phase6"),
         ("phase_logger.py reasoning", "end"),
     ]
 
@@ -255,11 +263,22 @@ def log_reasoning(data_dir, log_dir, today):
 
     for i, (mid, role, content, tool_name, tool_calls, \
             reasoning, reasoning_content, ts) in enumerate(messages):
-        # Check if this is a tool result containing a phase_logger call
+        # Check if this is a tool result from a phase_logger.py call.
+        # The tool_calls field on the preceding assistant message has the command,
+        # but the tool result content has the script output. We match on both:
+        # - tool_calls containing "phase_logger.py <phase>" (the command)
+        # - tool result content containing "Logged .../<phase>.json" (the output)
         if role == "tool" and tool_name == "terminal":
             text = (content or "")
+            # Also check the preceding assistant's tool_calls for the command
+            tool_call_text = ""
+            if i > 0:
+                prev = messages[i - 1]
+                if prev[1] == "assistant" and prev[4]:
+                    tool_call_text = prev[4]
+            combined = text + " " + tool_call_text
             for marker, label in boundaries:
-                if marker in text:
+                if marker in combined and label != current_phase:
                     phase_ranges.append((current_phase, current_start, i))
                     current_phase = label
                     current_start = i + 1
