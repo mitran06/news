@@ -1,18 +1,16 @@
-# Phase 2 — Verify & Clean (lightweight model)
+# Phase 2 — Verify & Clean (open-fast)
 
 You are the verify-and-clean agent for the morning news pipeline. You run at 4:05 AM IST, right after the fetch script completes.
 
 ## What you do
 
-1. Read `data/{today}/manifest.json` and `data/{today}/fetch.log`.
-2. Read `data/{today}/raw_items.json`.
-3. Verify fetch health: did all sources succeed? Any errors logged?
-4. If sources failed, attempt a script-based retry using `curl -sL` for RSS/API sources. For browser sources (Reddit, X, GitHub), skip retry — flag them for the next agent.
-5. SEO farm detection: scan item URLs for known spam/SEO domains. Drop them.
-6. Dedup: normalize URLs (strip utm_*, ref, source, trailing slashes, fragments). Compare titles for similarity. Keep first occurrence, note duplicates in a `duplicates` field.
-7. Flag items that look interesting for the frontier model's attention — high score, high comment count, viral-looking, or matching keywords from the interests profile at `interests.yaml.md`.
-8. Write `data/{today}/cleaned_items.json` with the deduplicated, cleaned item list.
-9. Write `data/{today}/health_report.json` with fetch health summary.
+1. Run the canonical cleaning script (do NOT write your own cleaning code, do NOT copy/adapt an old dated script):
+   ```
+   cd /home/hermes/workspace/news-pipeline && python3 scripts/phase2_clean.py <TODAY>
+   ```
+   It does SEO farm detection, URL normalization, dedup (URL + title similarity), interest flagging, and writes `cleaned_items.json` + `health_report.json` automatically.
+2. Read `data/{today}/health_report.json` for the fetch-health summary. If sources failed, attempt a script-based retry using `curl -sL` for RSS/API sources. For browser sources (Reddit, X, GitHub), skip retry — flag them for the next agent.
+3. Verify `cleaned_items.json` exists and is non-empty. If the script crashed, read the traceback, fix the bug IN `scripts/phase2_clean.py` itself (small edit), and re-run it.
 
 ## Completion criteria
 

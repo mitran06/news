@@ -432,6 +432,7 @@ X_JS = """(function() {
 def fetch_x():
     """Fetch tweets from followed accounts via twscrape. Also grabs X trending via twscrape."""
     items = []
+    x_last_error = None
 
     # ── Twscrape: timelines from followed accounts ──
     try:
@@ -481,54 +482,91 @@ def fetch_x():
                     await asyncio.sleep(0.3)
                 id_cache_file.write_text(json.dumps(id_cache, indent=2))
 
+            # ── Resume support + time budget ──
+            # X tweets are saved incrementally to data/<TODAY>/x_partial.json
+            # (username -> tweet items). If a previous run was killed mid-batch,
+            # this run resumes from the partial file instead of starting over.
+            # A time budget guarantees fetch.py ALWAYS exits cleanly (writes
+            # manifest.json) instead of being killed by the cron timeout.
+            tdir = DATA_DIR / datetime.now().strftime("%Y-%m-%d")
+            tdir.mkdir(parents=True, exist_ok=True)
+            partial_file = tdir / "x_partial.json"
+            partial = {}
+            if partial_file.exists():
+                try:
+                    partial = json.loads(partial_file.read_text())
+                    log(f"  resuming: {len(partial)} accounts already in partial file")
+                except Exception:
+                    partial = {}
+
+            X_TIME_BUDGET = 3300  # seconds; fetch.py must finish within the cron timeout
+            x_deadline = time.monotonic() + X_TIME_BUDGET
+
             # Fetch timelines in batches (50 per 15 min rate limit)
             # With reset_locks, the first batch always works cleanly
             BATCH_SIZE = 45
-            all_tweets = []
 
             for batch_start in range(0, len(usernames), BATCH_SIZE):
                 batch_num = batch_start // BATCH_SIZE + 1
                 batch = usernames[batch_start:batch_start + BATCH_SIZE]
                 if batch_num > 1:
+                    if time.monotonic() > x_deadline - 960:
+                        log(f"  ⏱ X time budget reached before batch {batch_num} — stopping cleanly ({len(partial)}/{len(usernames)} accounts done)")
+                        break
                     log(f"  Rate limit wait before batch {batch_num}...")
                     await asyncio.sleep(920)
 
                 for i, username in enumerate(batch):
+                    if username in partial:
+                        continue  # already fetched in an earlier (killed) run today
                     uid = id_cache.get(username)
                     if not uid:
                         continue
+                    if time.monotonic() > x_deadline:
+                        log(f"  ⏱ X time budget reached mid-batch {batch_num} — stopping cleanly ({len(partial)}/{len(usernames)} accounts done)")
+                        break
                     try:
                         tweets = await gather(api.user_tweets(uid, limit=20))
                         recent = [t for t in tweets if t.date and t.date > cutoff]
-                        for t in recent:
-                            all_tweets.append({
-                                "title": f"@{username}: {t.rawContent[:120]}",
-                                "url": t.url,
-                                "source": f"x/@{username}",
-                                "source_type": "x-timeline",
-                                "published": t.date.isoformat() if t.date else None,
-                                "date_unknown": t.date is None,
-                                "score": t.likeCount or 0,
-                                "retweets": t.retweetCount or 0,
-                                "replies": t.replyCount or 0,
-                                "views": t.viewCount or 0,
-                                "username": username,
-                                "tweet_id": t.id,
-                            })
+                        partial[username] = [{
+                            "title": f"@{username}: {t.rawContent[:120]}",
+                            "url": t.url,
+                            "source": f"x/@{username}",
+                            "source_type": "x-timeline",
+                            "published": t.date.isoformat() if t.date else None,
+                            "date_unknown": t.date is None,
+                            "score": t.likeCount or 0,
+                            "retweets": t.retweetCount or 0,
+                            "replies": t.replyCount or 0,
+                            "views": t.viewCount or 0,
+                            "username": username,
+                            "tweet_id": t.id,
+                        } for t in recent]
                         if recent:
                             log(f"  [{batch_start+i+1:3d}] ✅ {username:20s} | {len(recent):2d} T-24h")
                     except Exception as e:
                         log(f"  [{batch_start+i+1:3d}] ❌ {username:20s} | {str(e)[:60]}")
+                    # Incremental save after every account — survives kills
+                    partial_file.write_text(json.dumps(partial, ensure_ascii=False))
+                else:
+                    continue
+                break  # inner budget break → stop outer loop too
+
+            all_tweets = [t for tweets in partial.values() for t in tweets]
+            log(f"  X timelines complete: {len(all_tweets)} tweets from {len(partial)} accounts")
 
             return all_tweets
 
         tw_items = asyncio.run(scrape_timelines())
         items.extend(tw_items)
         log(f"FETCH x-timelines → {len(tw_items)} tweets from followed accounts")
+        x_last_error = None
     except ImportError:
         log("FETCH x-timelines → twscrape not installed, skipping")
+        x_last_error = "twscrape not installed"
     except Exception as e:
         log(f"FETCH x-timelines → FAILED: {e}")
+        x_last_error = f"{type(e).__name__}: {str(e)[:200]}"
 
     # ── Camofox: X trending (fallback — twscrape trends endpoint returns 0) ──
     try:
@@ -678,10 +716,11 @@ def main():
     except Exception as e:
         log(f"FETCH x → FAILED: {e}")
         x_info = {"timelines": 0, "trending": 0}
+        x_last_error = f"{type(e).__name__}: {str(e)[:200]}"
     ok += 1 if items else 0
     if not items:
         failed_names.append("x")
-    flog.append({"source": "x-timelines", "type": "twscrape", "status": 200 if x_info["timelines"] else 0, "items": x_info["timelines"], "error": "no tweets (rate limit or auth issue)" if not x_info["timelines"] else None})
+    flog.append({"source": "x-timelines", "type": "twscrape", "status": 200 if x_info["timelines"] else 0, "items": x_info["timelines"], "error": (x_last_error or "no tweets (per-account fetch errors or all accounts inactive)") if not x_info["timelines"] else None})
     flog.append({"source": "x-trending", "type": "browser", "status": 200 if x_info["trending"] else 0, "items": x_info["trending"], "error": "no trends (Camofox session or timing issue)" if not x_info["trending"] else None})
 
     # Write outputs

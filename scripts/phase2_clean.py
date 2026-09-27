@@ -1,194 +1,151 @@
 #!/usr/bin/env python3
-"""Phase 2 — Verify & Clean: dedup, SEO farm detection, flag interesting items."""
-import json, re, urllib.parse
-from datetime import datetime
+"""Canonical Phase 2 cleaning script — run daily by the news pipeline.
+
+Usage:
+    python3 scripts/phase2_clean.py <TODAY>   # e.g. 2026-09-25
+
+Does: SEO farm removal, URL normalization, dedup (URL + title similarity),
+interest flagging. Writes data/<TODAY>/cleaned_items.json and health_report.json.
+Health report is derived from manifest.json + fetch.log (no hardcoded values).
+
+This script is a permanent repo file. Do NOT write a new dated copy each day —
+just run this one. If the cleaning logic needs changes, edit THIS file.
+"""
+import json, re, sys
 from pathlib import Path
-from difflib import SequenceMatcher
+from urllib.parse import urlparse, parse_qs, urlencode
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-TODAY = datetime.now().strftime("%Y-%m-%d")
-TDIR = DATA_DIR / TODAY
+SCRIPT_DIR = Path(__file__).resolve().parent.parent
+if len(sys.argv) != 2:
+    print("usage: phase2_clean.py <YYYY-MM-DD>"); sys.exit(1)
+TODAY = sys.argv[1]
+DATA = SCRIPT_DIR / 'data' / TODAY
 
-# SEO farm domains
-SEO_FARM_PATTERNS = [
-    r'\.com\.pk$',
-    r'\.com\.ng$',
-    r'content-services-domain',
-    r'article-cube',
-    r'buzzwave\.',
-    r'viralweb\.',
-    r'trendingnow\.',
-    r'dailyweb\.',
-    r'techwire24',
-    r'newsdaily',
-]
+items = json.load(open(DATA / 'raw_items.json'))
+print(f"Starting with {len(items)} items")
 
-def normalize_url(url):
-    if not url:
-        return ""
-    # Strip fragments
-    url = url.split('#')[0]
-    # Parse and remove tracking params
-    parsed = urllib.parse.urlparse(url)
-    params = urllib.parse.parse_qs(parsed.query)
-    clean_params = {}
-    for k, v in params.items():
-        k_lower = k.lower()
-        if k_lower.startswith('utm_') or k_lower in ('ref', 'source', 'campaign', 'medium', 'content', 'term', 'feature', 'src', 'mc', 'cmpid'):
-            continue
-        clean_params[k] = v
-    new_query = urllib.parse.urlencode(clean_params, doseq=True)
-    clean_url = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip('/'), '', new_query, ''))
-    return clean_url.lower()
-
-def title_similarity(a, b):
-    if not a or not b:
-        return 0.0
-    return SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio()
+# --- SEO farm detection ---
+seo_domains = [r'.*\.com\.pk$', r'.*\.com\.ng$', r'content-services-domain\..*', r'article-cube\..*']
+seo_patterns = [re.compile(p, re.I) for p in seo_domains]
 
 def is_seo_farm(url):
-    if not url:
-        return False
-    domain = urllib.parse.urlparse(url).netloc.lower()
-    for pattern in SEO_FARM_PATTERNS:
-        if re.search(pattern, domain):
-            return True
-    return False
+    if not url: return False
+    domain = urlparse(url).netloc.lower()
+    return any(pat.match(domain) for pat in seo_patterns)
 
-# Interest keywords for flagging
-INTEREST_KEYWORDS = {
-    'high': ['ai agent', 'llm', 'gpt', 'claude', 'gemini', 'openai', 'anthropic', 'mistral', 'llama',
-             'fine-tun', 'rag', 'prompt', 'agent', 'orchestrat', 'eval', 'benchmark',
-             'startup', 'funding', 'seed', 'series a', 'series b', 'acquisition',
-             'open source', 'open-source', 'license', 'framework', 'fullstack', 'full-stack',
-             'nextjs', 'react', 'vue', 'svelte', 'python', 'rust', 'go ', 'golang',
-             'langchain', 'crewai', 'autogen', 'semantic kernel'],
-    'medium': ['linux kernel', 'gpu', 'chip', 'accelerator', 'semiconductor', 'nvidia', 'amd', 'intel',
-               'security', 'breach', 'cve', 'vulnerab', 'cryptograph', 'privacy',
-               'ide', 'ci/cd', 'cloud', 'aws', 'azure', 'gcp', 'kubernetes', 'docker',
-               'acquisition', 'ipo', 'market cap', 'big tech',
-               'india', 'bangalore', 'bengaluru', 'startup india'],
-    'context': ['science', 'research', 'paper', 'breakthrough', 'discovery',
-                'agi', 'singularity', 'futur', 'long-term'],
+# --- URL normalization ---
+def normalize_url(url):
+    if not url: return ""
+    url = url.split('#')[0]
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query)
+    clean_params = {k: v for k, v in params.items()
+                    if not k.lower().startswith('utm_')
+                    and k.lower() not in ('ref', 'source', 'mc_cid', 'mc_eid', '_ga', 'si', 'spm',
+                                          'at_medium', 'at_campaign')}
+    new_query = urlencode(clean_params, doseq=True)
+    clean_url = parsed._replace(query=new_query).geturl()
+    if clean_url.endswith('/') and parsed.path != '/':
+        clean_url = clean_url.rstrip('/')
+    return clean_url.lower()
+
+def title_similarity(t1, t2):
+    if not t1 or not t2: return 0
+    w1 = set(re.findall(r'\w+', t1.lower()))
+    w2 = set(re.findall(r'\w+', t2.lower()))
+    if not w1 or not w2: return 0
+    return len(w1.intersection(w2)) / len(w1.union(w2))
+
+seen_urls = {}
+seen_titles = []
+duplicates = []
+seo_farm_items = []
+cleaned = []
+
+for item in items:
+    url = item.get('url', '')
+    title = item.get('title', '')
+    if is_seo_farm(url):
+        seo_farm_items.append(item); continue
+    norm_url = normalize_url(url)
+    if norm_url and norm_url in seen_urls:
+        duplicates.append({'title': title, 'url': url, 'duplicate_of': seen_urls[norm_url]})
+        continue
+    is_dup = False
+    for prev_title, prev_idx in seen_titles:
+        sim = title_similarity(title, prev_title)
+        if sim > 0.8:
+            duplicates.append({'title': title, 'url': url, 'duplicate_of_title': prev_title, 'similarity': round(sim, 3)})
+            is_dup = True; break
+    if is_dup: continue
+    cleaned_item = dict(item)
+    if norm_url:
+        cleaned_item['normalized_url'] = norm_url
+        seen_urls[norm_url] = title
+    seen_titles.append((title, len(cleaned)))
+    cleaned.append(cleaned_item)
+
+print(f"SEO farm removed: {len(seo_farm_items)}")
+print(f"Duplicates removed: {len(duplicates)}")
+print(f"Cleaned items: {len(cleaned)}")
+
+# --- Interest flagging ---
+interest_keywords = {
+    'ai_agent': ['agent', 'agentic', 'autonomous', 'orchestrat', 'crew', 'autogen', 'langgraph', 'multi-agent'],
+    'llm': ['llm', 'gpt', 'claude', 'gemini', 'llama', 'mistral', 'deepseek', 'benchmark', 'fine-tun', 'fine tun', 'rlhf', 'transformer'],
+    'ai_engineering': ['rag', 'eval', 'prompt', 'vector', 'embedding', 'langchain', 'tool use', 'function call', 'mcp'],
+    'startup': ['startup', 'funding', 'seed', 'series a', 'series b', 'launch', 'founder', 'yc', 'y combinator'],
+    'open_source': ['open source', 'opensource', 'license', 'mit license', 'apache', 'gpl', 'fork'],
+    'fullstack': ['framework', 'react', 'vue', 'svelte', 'nextjs', 'next.js', 'deno', 'bun', 'tailwind', 'database', 'postgres', 'redis'],
+    'linux': ['linux', 'kernel', 'driver', 'filesystem', 'btrfs', 'ext4', 'systemd'],
+    'hardware': ['gpu', 'nvidia', 'amd', 'chip', 'accelerator', 'semiconductor', 'tpu', 'silicon', 'blackwell', 'epyc'],
+    'security': ['breach', 'cve', 'vulnerab', 'exploit', 'ransomware', 'privacy', 'zero-day', '0day', 'sandworm', 'botnet'],
+    'devtools': ['ide', 'vscode', 'ci/cd', 'github actions', 'docker', 'kubernetes', 'k8s', 'cloud', 'api'],
+    'tech_business': ['acqui', 'ipo', 'earnings', 'layoff', 'antitrust', 'meta', 'google', 'apple', 'microsoft', 'amazon', 'openai', 'anthropic'],
+    'india_tech': ['india', 'bangalore', 'bengaluru', 'indian'],
 }
 
-def flag_interest(item):
-    title = (item.get('title', '') + ' ' + item.get('summary', '')).lower()
-    flags = []
-    for tier, keywords in INTEREST_KEYWORDS.items():
-        for kw in keywords:
-            if kw in title:
-                flags.append({'tier': tier, 'keyword': kw})
-    return flags
+for item in cleaned:
+    text = (item.get('title', '') + ' ' + (item.get('summary') or '') + ' ' + str(item.get('body_text') or item.get('discussion_body') or '')[:500]).lower()
+    matched = []
+    for category, kws in interest_keywords.items():
+        if any(kw in text for kw in kws):
+            matched.append(category)
+    item['interest_flags'] = list(set(matched))
+    score = item.get('score', 0) or 0
+    comments = item.get('comments', 0) or item.get('num_comments', 0) or 0
+    item['viral_flag'] = bool(score >= 100 or comments >= 50)
 
-def main():
-    # Read raw items
-    with open(TDIR / "raw_items.json") as f:
-        items = json.load(f)
-    
-    print(f"Loaded {len(items)} raw items")
-    
-    # SEO farm detection
-    seo_dropped = []
-    cleaned = []
-    for item in items:
-        url = item.get('url', '')
-        if is_seo_farm(url):
-            seo_dropped.append(item)
-        else:
-            cleaned.append(item)
-    print(f"SEO farm dropped: {len(seo_dropped)}")
-    
-    # Dedup: URL normalization + title similarity
-    seen_urls = {}
-    seen_titles = []
-    deduped = []
-    duplicates = []
-    
-    for item in cleaned:
-        norm_url = normalize_url(item.get('url', ''))
-        title = item.get('title', '').strip()
-        
-        # Check URL dup
-        if norm_url and norm_url in seen_urls:
-            duplicates.append({
-                'dropped_title': title,
-                'dropped_url': item.get('url', ''),
-                'kept_title': seen_urls[norm_url].get('title', ''),
-                'reason': 'same_url'
-            })
-            continue
-        
-        # Check title similarity
-        is_dup = False
-        for seen_title, seen_item in seen_titles:
-            sim = title_similarity(title, seen_title)
-            if sim > 0.8:
-                duplicates.append({
-                    'dropped_title': title,
-                    'dropped_url': item.get('url', ''),
-                    'kept_title': seen_title,
-                    'reason': f'title_similarity={sim:.2f}'
-                })
-                is_dup = True
-                break
-        
-        if not is_dup:
-            deduped.append(item)
-            if norm_url:
-                seen_urls[norm_url] = item
-            seen_titles.append((title, item))
-    
-    print(f"Duplicates removed: {len(duplicates)}")
-    print(f"Final cleaned items: {len(deduped)}")
-    
-    # Flag interesting items
-    for item in deduped:
-        flags = flag_interest(item)
-        item['interest_flags'] = flags
-        # Score for ranking
-        score = 0
-        if item.get('score', 0) > 100:
-            score += 2
-        elif item.get('score', 0) > 50:
-            score += 1
-        if item.get('comments', 0) > 100:
-            score += 2
-        elif item.get('comments', 0) > 50:
-            score += 1
-        for f in flags:
-            if f['tier'] == 'high':
-                score += 2
-            elif f['tier'] == 'medium':
-                score += 1
-            elif f['tier'] == 'context':
-                score += 0.5
-        item['interest_score'] = score
-    
-    # Write cleaned items
-    with open(TDIR / "cleaned_items.json", "w") as f:
-        json.dump(deduped, f, indent=2, ensure_ascii=False)
-    
-    # Write health report
-    health = {
-        "date": TODAY,
-        "status": "ok",
-        "sources_ok": 60,
-        "sources_failed": 0,
-        "failed_sources": [],
-        "skipped_sources": ["x-timelines (twscrape rate limit)"],
-        "raw_items": len(items),
-        "seo_farm_dropped": len(seo_dropped),
-        "duplicates_removed": len(duplicates),
-        "cleaned_items": len(deduped),
-        "notes": "X timelines skipped due to twscrape rate limit. All other sources succeeded.",
-        "duplicates_sample": duplicates[:20],
-    }
-    with open(TDIR / "health_report.json", "w") as f:
-        json.dump(health, f, indent=2, ensure_ascii=False)
-    
-    print(f"\nHealth report written")
-    print(f"Cleaned items: {len(deduped)}")
+json.dump(cleaned, open(DATA / 'cleaned_items.json', 'w'), indent=2)
 
-if __name__ == "__main__":
-    main()
+# --- Health report from actual manifest/fetch.log ---
+try:
+    manifest = json.load(open(DATA / 'manifest.json'))
+except FileNotFoundError:
+    manifest = {"sources_fetched": None, "sources_ok": None, "sources_failed": None,
+                "failed_sources": [], "note": "manifest.json missing — fetch was killed before writing it"}
+failed_sources = []
+fetch_log = (DATA / 'fetch.log')
+if fetch_log.exists():
+    for line in fetch_log.read_text().splitlines():
+        if 'ERROR' in line:
+            parts = [p.strip() for p in line.split('|')]
+            if parts:
+                failed_sources.append(parts[0])
+
+health = {
+    'date': TODAY,
+    'sources_fetched': manifest.get('sources_fetched'),
+    'sources_ok': manifest.get('sources_ok'),
+    'sources_failed': manifest.get('sources_failed'),
+    'failed_sources': failed_sources or manifest.get('failed_sources', []),
+    'total_raw_items': len(items),
+    'seo_farm_removed': len(seo_farm_items),
+    'duplicates_removed': len(duplicates),
+    'cleaned_items': len(cleaned),
+    'status': 'ok'
+}
+if manifest.get('note'):
+    health['note'] = manifest['note']
+json.dump(health, open(DATA / 'health_report.json', 'w'), indent=2)
+print('Wrote cleaned_items.json and health_report.json')
